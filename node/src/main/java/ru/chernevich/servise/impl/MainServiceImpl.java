@@ -6,15 +6,16 @@ import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
 import ru.chernevich.dao.AppUserDAO;
-import ru.chernevich.entity.AppDocument;
-import ru.chernevich.entity.AppUser;
-import ru.chernevich.entity.RawData;
-import ru.chernevich.entity.RawDataDAO;
+import ru.chernevich.entity.*;
 import ru.chernevich.exeptions.UploadFileException;
+import ru.chernevich.servise.AppUserService;
 import ru.chernevich.servise.FileService;
 import ru.chernevich.servise.MainService;
 import ru.chernevich.servise.ProducerService;
+import ru.chernevich.servise.enums.LinkType;
 import ru.chernevich.servise.enums.ServiceCommand;
+
+import java.util.Optional;
 
 import static ru.chernevich.entity.enums.UserState.BASIC_STATE;
 import static ru.chernevich.entity.enums.UserState.WAIT_FOR_EMAIL_STATE;
@@ -27,16 +28,18 @@ public class MainServiceImpl implements MainService {
     private final ProducerService producerService;
     private final AppUserDAO appUserDAO;
     private final FileService fileService;
+    private final AppUserService appUserService;
 
 
     public MainServiceImpl(RawDataDAO rawDataDAO,
                            ProducerService producerService,
                            AppUserDAO appUserDAO,
-                           FileService fileService) {
+                           FileService fileService, AppUserService userService) {
         this.rawDataDAO = rawDataDAO;
         this.producerService = producerService;
         this.appUserDAO = appUserDAO;
         this.fileService = fileService;
+        this.appUserService = userService;
     }
 
     @Override
@@ -54,7 +57,7 @@ public class MainServiceImpl implements MainService {
         } else if (BASIC_STATE.equals(userState)){
             outPut = processServiceCommand(appUser, text);
         } else if(WAIT_FOR_EMAIL_STATE.equals(userState)){
-
+            outPut = appUserService.setEmail(appUser, text);
         } else {
             log.error("Unknown user state " + userState);
             outPut = "Unknown user state";
@@ -76,7 +79,10 @@ public class MainServiceImpl implements MainService {
 
         try {
             AppDocument doc = fileService.processDoc(update.getMessage());
-            var answer = "Документ успешно загружен";
+            String link = fileService.generateLink(doc.getId(), LinkType.GET_DOC);
+            var answer = "Документ успешно загружен!"
+                    +"Ссылка для скачивания: "
+                    + link;
             sendAnswer(answer, chatId);
         } catch (UploadFileException ex) {
             log.error(ex);
@@ -94,8 +100,19 @@ public class MainServiceImpl implements MainService {
             return;
         }
 
-        var answer = "Фото успешно загружено";
-        sendAnswer(answer, chatId);
+        try {
+            AppPhoto photo = fileService.processPhoto(update.getMessage());
+            String link = fileService.generateLink(photo.getId(), LinkType.GET_PHOTO);
+            var answer = "Фото успешно загружено!"
+                    +"Ссылка для скачивания: "
+                    + link ;
+            sendAnswer(answer, chatId);
+        } catch (UploadFileException ex) {
+            log.error(ex);
+            String error = "Ошибка загрузки фото";
+            sendAnswer(error, chatId);
+        }
+
     }
 
     private boolean isNotAllowToSendContent(Long chatId, AppUser appUser) {
@@ -121,11 +138,12 @@ public class MainServiceImpl implements MainService {
     }
 
     private String processServiceCommand(AppUser appUser, String cmd) {
-        if(REGISTRATION.equals(cmd)) {
-            return "Временно недоступна";
-        } else if (HELP.equals(cmd)) {
+        var serverCommand = ServiceCommand.fromValue(cmd);
+        if(REGISTRATION.equals(serverCommand)) {
+            return appUserService.registerUser(appUser);
+        } else if (HELP.equals(serverCommand)) {
             return help();
-        } else if (START.equals(cmd)) {
+        } else if (START.equals(serverCommand)) {
             return "Привет! Чтобы просмотреть список доступных команд введите /help";
         } else {
             return "Неизвестная команда! Чтобы просмотреть список доступных команд введите /help";
@@ -146,19 +164,19 @@ public class MainServiceImpl implements MainService {
 
     private AppUser findOrSaveAppUser(Update update) {
         User telegramUser = update.getMessage().getFrom();
-        AppUser persistedAppUser = AppUserDAO.findAppUserByTelegramUserId(telegramUser.getId());
-        if(persistedAppUser == null) {
+        var optional = appUserDAO.findByTelegramUserId(telegramUser.getId());
+        if(optional.isEmpty()) {
             AppUser transientAppUser = AppUser.builder()
                     .telegramUserId(telegramUser.getId())
                     .userName(telegramUser.getUserName())
                     .firstName(telegramUser.getFirstName())
                     .lastName(telegramUser.getLastName())
-                    .isActive(true)
+                    .isActive(false)
                     .userState(BASIC_STATE)
                     .build();
             return appUserDAO.save(transientAppUser);
         }
-        return persistedAppUser;
+        return optional.get();
     }
 
     private void saveRawData(Update update) {

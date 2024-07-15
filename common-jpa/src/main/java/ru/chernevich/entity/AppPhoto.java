@@ -1,6 +1,7 @@
 package ru.chernevich.entity;
 
 import jakarta.persistence.*;
+import jakarta.persistence.criteria.CriteriaBuilder;
 import lombok.*;
 
 @Getter
@@ -10,16 +11,14 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name="app_document")
-public class AppDocument {
+@Table(name="app_photo")
+public class AppPhoto {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     private String telegramFileId;
-    private String docName;
     @OneToOne
     private BinaryContent binaryContent;
-    private String mimeType;
-    private Long fileSize;
+    private Integer fileSize;
 
 }
